@@ -5,3 +5,8 @@
 [functions]
   directory = "."
 
+[[redirects]]
+  from = "/functions/*"
+  to = "/functions/:splat"
+  status = 200
+  force = true
