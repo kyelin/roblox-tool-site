@@ -238,7 +238,6 @@ exports.handler = async (event, context) => {
 
         const placeKey = getPlaceKey(parsed.placeId, parsed.placeName)
         const text =
-            `来自 Discord 的反馈\n` +
             `Place: ${placeKey}\n` +
             (parsed.playerDisplayName ? `玩家: ${parsed.playerDisplayName}\n` : "") +
             (parsed.header ? `类型: ${parsed.header}\n` : "") +
