@@ -99,6 +99,13 @@ async function sendDingTalkText(webhookUrl, text, atAll) {
     })
 }
 
+async function postToDiscord(webhookUrl, payload) {
+    return axios.post(webhookUrl, payload, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 10000
+    })
+}
+
 function getReportIntervalMs() {
     const envMs = process.env.DINGTALK_REPORT_INTERVAL_MS
     const envSeconds = process.env.DINGTALK_REPORT_INTERVAL_SECONDS
@@ -193,9 +200,10 @@ exports.handler = async (event, context) => {
         }
     }
 
-    const webhookUrl = process.env.DINGTALK_WEBHOOK_URL
+    const dingTalkWebhookUrl = process.env.DINGTALK_WEBHOOK_URL
+    const discordWebhookUrl = process.env.DISCORD_WEBHOOK_URL
 
-    if (!webhookUrl) {
+    if (!dingTalkWebhookUrl) {
         return {
             statusCode: 500,
             headers: {
@@ -203,6 +211,17 @@ exports.handler = async (event, context) => {
                 "Access-Control-Allow-Origin": "*"
             },
             body: JSON.stringify({ error: "DINGTALK_WEBHOOK_URL is not configured" })
+        }
+    }
+
+    if (!discordWebhookUrl) {
+        return {
+            statusCode: 500,
+            headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+            },
+            body: JSON.stringify({ error: "DISCORD_WEBHOOK_URL is not configured" })
         }
     }
 
@@ -231,6 +250,7 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({ error: "content is required" })
         }
     }
+    
 
     try {
         const parsed = parseDiscordContent(payload.content)
@@ -244,10 +264,33 @@ exports.handler = async (event, context) => {
             `内容:\n` +
             (parsed.feedback ? parsed.feedback : parsed.rawContent)
 
-        const finalWebhookUrl = buildDingTalkWebhookUrl(webhookUrl)
-        await sendDingTalkText(finalWebhookUrl, text, false)
+        const finalDingTalkWebhookUrl = buildDingTalkWebhookUrl(dingTalkWebhookUrl)
 
-        await trySendReport()
+        const [dingTalkResult, discordResult] = await Promise.allSettled([
+            sendDingTalkText(finalDingTalkWebhookUrl, text, false),
+            postToDiscord(discordWebhookUrl, payload)
+        ])
+
+        if (dingTalkResult.status === "fulfilled") {
+            await trySendReport()
+        }
+
+        if (dingTalkResult.status === "rejected" || discordResult.status === "rejected") {
+            return {
+                statusCode: 502,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"
+                },
+                body: JSON.stringify({
+                    error: "Failed to send webhook",
+                    failed: {
+                        dingtalk: dingTalkResult.status === "rejected",
+                        discord: discordResult.status === "rejected"
+                    }
+                })
+            }
+        }
 
         return {
             statusCode: 204,
@@ -263,7 +306,7 @@ exports.handler = async (event, context) => {
                 "Content-Type": "application/json",
                 "Access-Control-Allow-Origin": "*"
             },
-            body: JSON.stringify({ error: "Failed to send to DingTalk" })
+            body: JSON.stringify({ error: "Failed to handle request" })
         }
     }
 }
