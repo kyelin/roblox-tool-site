@@ -193,9 +193,21 @@ exports.handler = async (event, context) => {
         }
     }
 
-    const webhookUrl = process.env.DINGTALK_WEBHOOK_URL
+    const discordWebhookUrl = process.env.DISCORD_WEBHOOK_URL
+    const dingTalkWebhookUrl = process.env.DINGTALK_WEBHOOK_URL
 
-    if (!webhookUrl) {
+    if (!discordWebhookUrl) {
+        return {
+            statusCode: 500,
+            headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+            },
+            body: JSON.stringify({ error: "DISCORD_WEBHOOK_URL is not configured" })
+        }
+    }
+
+    if (!dingTalkWebhookUrl) {
         return {
             statusCode: 500,
             headers: {
@@ -245,10 +257,34 @@ exports.handler = async (event, context) => {
             (parsed.feedback ? parsed.feedback : parsed.rawContent)
 
         const finalWebhookUrl = buildDingTalkWebhookUrl(webhookUrl)
-        await sendDingTalkText(finalWebhookUrl, text, false)
+        const finalDingTalkWebhookUrl = buildDingTalkWebhookUrl(dingTalkWebhookUrl)
 
-        await trySendReport()
+        const pushResults = await Promise.allSettled([
+            axios.post(discordWebhookUrl, payload, { timeout: 10000 }),
+            sendDingTalkText(finalDingTalkWebhookUrl, text, false)
+        ])
 
+        const discordError = pushResults[0].status === "rejected" ? pushResults[0].reason : null
+        const dingTalkError = pushResults[1].status === "rejected" ? pushResults[1].reason : null
+
+        if (discordError || dingTalkError) {
+            return {
+                statusCode: 502,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"
+                },
+                body: JSON.stringify({
+                    error: "Failed to push",
+                    channels: {
+                        discord: discordError ? "failed" : "ok",
+                        dingTalk: dingTalkError ? "failed" : "ok"
+                    }
+                })
+            }
+        }
+
+        trySendReport().catch(() => {})
         return {
             statusCode: 204,
             headers: {
@@ -263,7 +299,7 @@ exports.handler = async (event, context) => {
                 "Content-Type": "application/json",
                 "Access-Control-Allow-Origin": "*"
             },
-            body: JSON.stringify({ error: "Failed to send to DingTalk" })
+            body: JSON.stringify({ error: "Failed to process request" })
         }
     }
 }
